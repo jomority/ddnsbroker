@@ -1,8 +1,5 @@
-from django.core.exceptions import PermissionDenied
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse
 from django.views.generic import View
-
-from ddnsbroker.models import UpdateService
 
 
 class RemoteIpView(View):
@@ -12,16 +9,3 @@ class RemoteIpView(View):
 
 class NicUpdateView(View):
     pass  # TODO
-
-
-class UpdateServiceGetUsernameIsFqdnView(View):
-    def get(self, request, id):
-        if not request.user.is_authenticated:
-            raise PermissionDenied
-
-        try:
-            uif = UpdateService.objects.get(id=id).username_is_fqdn
-        except UpdateService.DoesNotExist:
-            uif = False
-
-        return JsonResponse(uif, safe=False)

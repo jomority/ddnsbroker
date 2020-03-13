@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 from django.core.validators import RegexValidator, MaxValueValidator, URLValidator
 from django.db import models
+from django.utils import timezone
 
 
 class Host(models.Model):
@@ -28,6 +29,8 @@ class Host(models.Model):
 
     ipv4 = models.GenericIPAddressField(verbose_name="IPv4", protocol='IPv4', null=True, blank=True)
     ipv6 = models.GenericIPAddressField(verbose_name="IPv6", protocol='IPv6', null=True, blank=True)
+    __original_ipv4 = None
+    __original_ipv6 = None
 
     last_ipv4_update = models.DateTimeField(null=True, blank=True, editable=False)
     last_ipv6_update = models.DateTimeField(null=True, blank=True, editable=False)
@@ -39,15 +42,37 @@ class Host(models.Model):
     def __str__(self):
         return self.fqdn
 
+    class Meta(object):
+        ordering = ('fqdn',)
+
     def __init__(self, *args, **kwargs):
         super(Host, self).__init__(*args, **kwargs)
         self.__original_secret = self.secret
+        self.__original_ipv4 = self.ipv4
+        self.__original_ipv6 = self.ipv6
 
     def save(self, *args, **kwargs):
         if self.secret != self.__original_secret:
             self.generate_secret(secret=self.secret, save=False)
+
+        ip_changed = False
+        now = timezone.now()
+        if self.ipv4 != self.__original_ipv4 and self.ipv4 != "":
+            self.last_ipv4_change = now
+            ip_changed = True
+        if self.ipv6 != self.__original_ipv6 and self.ipv6 != "":
+            self.last_ipv6_change = now
+            ip_changed = True
+
         super(Host, self).save(*args, **kwargs)
+
         self.__original_secret = self.secret
+        self.__original_ipv4 = self.ipv4
+        self.__original_ipv6 = self.ipv6
+
+        if ip_changed:
+            for record in Record.objects.filter(host=self):
+                record.save()
 
     def generate_secret(self, secret=None, save=True):
         if secret is None:
@@ -74,6 +99,9 @@ class UpdateService(models.Model):
 
     def __str__(self):
         return self.name
+
+    class Meta(object):
+        ordering = ('name',)
 
 
 class Record(models.Model):
@@ -113,6 +141,19 @@ class Record(models.Model):
         protocol='IPv6', default="::",
         help_text="IPv6 record uses this host identifier, e.g. \"::4042:42FF:FE42:4242\".")
 
+    effective_ipv4 = models.GenericIPAddressField(
+        verbose_name="effective IPv4",
+        protocol='IPv4',
+        null=True, blank=True, editable=False
+    )
+    effective_ipv6 = models.GenericIPAddressField(
+        verbose_name="effective IPv6",
+        protocol='IPv6',
+        null=True, blank=True, editable=False
+    )
+    __original_effective_ipv4 = None
+    __original_effective_ipv6 = None
+
     service = models.ForeignKey(UpdateService, on_delete=models.PROTECT)
 
     username = models.CharField(max_length=255, blank=True)
@@ -132,16 +173,37 @@ class Record(models.Model):
         unique_together = (('host', 'fqdn'),)
         ordering = ('host', 'fqdn')
 
+    def __init__(self, *args, **kwargs):
+        super(Record, self).__init__(*args, **kwargs)
+        self.__original_effective_ipv4 = self.effective_ipv4
+        self.__original_effective_ipv6 = self.effective_ipv6
+
     def save(self, *args, **kwargs):
         if not self.fqdn:
             self.fqdn = self.host.fqdn
         if self.service.username_is_fqdn:
             self.username = self.fqdn
+
+        self.__update_effective_ipv4()
+        self.__update_effective_ipv6()
+
+        now = timezone.now()
+        if self.effective_ipv4 != self.__original_effective_ipv4:
+            self.last_ipv4_change = now
+            # TODO: send update, if successful update last_ipv4_update
+        if self.effective_ipv6 != self.__original_effective_ipv6:
+            self.last_ipv6_change = now
+            # TODO: send update, if successful update last_ipv6_update
+
         super(Record, self).save(*args, **kwargs)
 
-    def get_effective_ipv4(self) -> str:
+        self.__original_effective_ipv4 = self.effective_ipv4
+        self.__original_effective_ipv6 = self.effective_ipv6
+
+    def __update_effective_ipv4(self) -> None:
         if self.host.ipv4 is None:
-            return "None"
+            self.effective_ipv4 = None
+            return
 
         host_id: int = int(IPv4Address(self.ipv4_host_id))
         host_id_short: int = host_id & ((1 << 32 - self.ipv4_netmask) - 1)
@@ -149,11 +211,12 @@ class Record(models.Model):
         network: str = "{}/{}".format(self.host.ipv4, self.ipv4_netmask)
         network_address: IPv4Address = IPv4Network(network, strict=False).network_address
 
-        return str(network_address + host_id_short)
+        self.effective_ipv4 = str(network_address + host_id_short)
 
-    def get_effective_ipv6(self) -> str:
+    def __update_effective_ipv6(self) -> None:
         if self.host.ipv6 is None:
-            return "None"
+            self.effective_ipv6 = None
+            return
 
         host_id: int = int(IPv6Address(self.ipv6_host_id))
         host_id_short: int = host_id & ((1 << 128 - self.ipv6_netmask) - 1)
@@ -161,4 +224,4 @@ class Record(models.Model):
         network: str = "{}/{}".format(self.host.ipv6, self.ipv6_netmask)
         network_address: IPv6Address = IPv6Network(network, strict=False).network_address
 
-        return str(network_address + host_id_short)
+        self.effective_ipv6 = str(network_address + host_id_short)
