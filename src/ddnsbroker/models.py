@@ -1,7 +1,7 @@
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, AddressValueError
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import make_password, check_password
 from django.core.validators import RegexValidator, MaxValueValidator, URLValidator
 from django.db import models
 from django.utils import timezone
@@ -57,12 +57,11 @@ class Host(models.Model):
         except AddressValueError:
             self.__original_ipv6 = None
 
-    def save(self, *args, **kwargs):
+    def save(self, now=timezone.now(), *args, **kwargs):
         if self.secret != self.__original_secret:
             self.generate_secret(secret=self.secret, save=False)
 
         ip_changed = False
-        now = timezone.now()
         if self.ipv4 != "" and IPv4Address(self.ipv4) != self.__original_ipv4:
             self.last_ipv4_change = now
             ip_changed = True
@@ -84,7 +83,9 @@ class Host(models.Model):
 
         if ip_changed:
             for record in Record.objects.filter(host=self):
-                record.save()
+                record.save(now=now)
+
+        return ip_changed
 
     def generate_secret(self, secret=None, save=True):
         if secret is None:
@@ -93,6 +94,9 @@ class Host(models.Model):
         if save:
             self.save()
         return secret
+
+    def check_password(self, password):
+        return check_password(password, self.secret)
 
 
 class UpdateService(models.Model):
@@ -190,7 +194,7 @@ class Record(models.Model):
         self.__original_effective_ipv4 = self.effective_ipv4
         self.__original_effective_ipv6 = self.effective_ipv6
 
-    def save(self, *args, **kwargs):
+    def save(self, now=timezone.now(), *args, **kwargs):
         if not self.fqdn:
             self.fqdn = self.host.fqdn
         if self.service.username_is_fqdn:
@@ -199,7 +203,6 @@ class Record(models.Model):
         self.__update_effective_ipv4()
         self.__update_effective_ipv6()
 
-        now = timezone.now()
         if self.effective_ipv4 != self.__original_effective_ipv4:
             self.last_ipv4_change = now
             # TODO: send update, if successful update last_ipv4_update
