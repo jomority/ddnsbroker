@@ -1,4 +1,4 @@
-from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, AddressValueError
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
@@ -48,8 +48,14 @@ class Host(models.Model):
     def __init__(self, *args, **kwargs):
         super(Host, self).__init__(*args, **kwargs)
         self.__original_secret = self.secret
-        self.__original_ipv4 = self.ipv4
-        self.__original_ipv6 = self.ipv6
+        try:
+            self.__original_ipv4 = IPv4Address(str(self.ipv4))
+        except AddressValueError:
+            self.__original_ipv4 = None
+        try:
+            self.__original_ipv6 = IPv6Address(str(self.ipv6))
+        except AddressValueError:
+            self.__original_ipv6 = None
 
     def save(self, *args, **kwargs):
         if self.secret != self.__original_secret:
@@ -57,18 +63,24 @@ class Host(models.Model):
 
         ip_changed = False
         now = timezone.now()
-        if self.ipv4 != self.__original_ipv4 and self.ipv4 != "":
+        if self.ipv4 != "" and IPv4Address(self.ipv4) != self.__original_ipv4:
             self.last_ipv4_change = now
             ip_changed = True
-        if self.ipv6 != self.__original_ipv6 and self.ipv6 != "":
+        if self.ipv6 != "" and IPv6Address(self.ipv6) != self.__original_ipv6:
             self.last_ipv6_change = now
             ip_changed = True
 
         super(Host, self).save(*args, **kwargs)
 
         self.__original_secret = self.secret
-        self.__original_ipv4 = self.ipv4
-        self.__original_ipv6 = self.ipv6
+        try:
+            self.__original_ipv4 = IPv4Address(str(self.ipv4))
+        except AddressValueError:
+            self.__original_ipv4 = None
+        try:
+            self.__original_ipv6 = IPv6Address(str(self.ipv6))
+        except AddressValueError:
+            self.__original_ipv6 = None
 
         if ip_changed:
             for record in Record.objects.filter(host=self):
