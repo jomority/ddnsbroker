@@ -1,0 +1,56 @@
+<script>
+    (function ($) {
+        $(function () {
+            const host = $("#id_host");
+            const fqdn = $("#id_fqdn");
+            const service = $("#id_service");
+            const username = $("#id_username");
+
+            let serviceMap = [];
+            {% for us in updateServices %}
+                serviceMap["{{ us.name }}"] = {% if us.username_is_fqdn %}true{% else %}false{% endif %};
+            {% endfor %}
+
+            let hostOldValue = host.prop(host.prop('selectedIndex')).label;
+            let usernameIsFqdn = false;
+
+            // Change fqdn when host is changed
+            host.change(function () {
+                if (this.selectedIndex === 0)
+                    return;
+
+                const newValue = this[this.selectedIndex].label;
+
+                if (fqdn.val() === "" || fqdn.val() === hostOldValue)
+                    fqdn.val(newValue);
+
+                hostOldValue = newValue;
+            });
+
+            // Enable/disable username field according to selected service
+            function updateUsernameField() {
+                let uif = false;
+                if (service.selectedIndex !== 0) {
+                    const serviceName = service.prop(service.prop('selectedIndex')).label;
+                    uif = serviceMap[serviceName];
+                }
+
+                usernameIsFqdn = uif;
+                username.prop("disabled", uif);
+                if (uif)
+                    username.val(fqdn.val());
+            }
+
+            // Tie username value to that of fqdn if usernameisfqdn is enabled (only cosmetic)
+            fqdn.change(function () {
+                if (usernameIsFqdn)
+                    username.val(this.value);
+            });
+
+            // Update username field based on selected service
+            service.change(updateUsernameField);
+            updateUsernameField();
+
+        });
+    })(django.jQuery);
+</script>

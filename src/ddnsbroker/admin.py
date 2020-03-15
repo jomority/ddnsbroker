@@ -1,7 +1,11 @@
 from django.contrib import admin
+from django.contrib import messages
 
 from ddnsbroker.models import Host, UpdateService, Record
-from django.contrib import messages
+
+
+class RecordInline(admin.TabularInline):
+    model = Record
 
 
 class HostAdmin(admin.ModelAdmin):
@@ -22,6 +26,18 @@ class HostAdmin(admin.ModelAdmin):
     list_filter = ('ipv4_enabled', 'ipv6_enabled')
 
     search_fields = ('fqdn',)
+
+    inlines = [RecordInline]
+
+    def add_view(self, request, form_url='', extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['updateServices'] = UpdateService.objects.all()
+        return super(HostAdmin, self).add_view(request, form_url, extra_context)
+
+    def change_view(self, request, object_id, form_url='', extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['updateServices'] = UpdateService.objects.all()
+        return super(HostAdmin, self).change_view(request, object_id, form_url, extra_context)
 
 
 class RecordAdmin(admin.ModelAdmin):
@@ -62,6 +78,11 @@ class RecordAdmin(admin.ModelAdmin):
         self.message_user(request, "This function is not yet implemented", level=messages.WARNING)
 
     update_records.short_description = "Force update selected records"
+
+    def add_view(self, request, form_url='', extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['updateServices'] = UpdateService.objects.all()
+        return super(RecordAdmin, self).add_view(request, form_url, extra_context)
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
         extra_context = extra_context or {}

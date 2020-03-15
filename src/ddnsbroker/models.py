@@ -201,7 +201,7 @@ class Record(models.Model):
         self.__original_effective_ipv6 = self.effective_ipv6
 
     def __update_effective_ipv4(self) -> None:
-        if self.host.ipv4 is None:
+        if self.host.ipv4 is None or self.host.ipv4 is "":
             self.effective_ipv4 = None
             return
 
@@ -214,7 +214,7 @@ class Record(models.Model):
         self.effective_ipv4 = str(network_address + host_id_short)
 
     def __update_effective_ipv6(self) -> None:
-        if self.host.ipv6 is None:
+        if self.host.ipv6 is None or self.host.ipv6 is "":
             self.effective_ipv6 = None
             return
 

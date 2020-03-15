@@ -1,0 +1,61 @@
+<script>
+    (function ($) {
+        $(function () {
+            const add = $("tr.add-row a");
+
+            let fqdn, service, username;
+
+            let serviceMap = [];
+            {% for us in updateServices %}
+                serviceMap["{{ us.name }}"] = {% if us.username_is_fqdn %}true{% else %}false{% endif %};
+            {% endfor %}
+
+            let usernameIsFqdn = [];
+
+            // Enable/disable username field according to selected service
+            function updateUsernameField(i) {
+                let uif = false;
+                if (service[i].selectedIndex !== 0) {
+                    const serviceName = service[i][service[i].selectedIndex].label;
+                    uif = serviceMap[serviceName];
+                }
+
+                usernameIsFqdn[i] = uif;
+                username[i].disabled = uif;
+                if (uif)
+                    username[i].value = fqdn[i].value;
+            }
+
+            function init() {
+                fqdn = $("tr.dynamic-record_set input[id$='fqdn']");
+                service = $("tr.dynamic-record_set select[id$='service']");
+                username = $("tr.dynamic-record_set input[id$='username']");
+
+                // Tie username value to that of fqdn if usernameisfqdn is enabled (only cosmetic)
+                fqdn.each(function (i, obj) {
+                    if (obj.click_added !== true) {
+                        $(obj).change(function () {
+                            if (usernameIsFqdn[i])
+                                username[i].value = obj.value;
+                        });
+                        obj.click_added = true;
+                    }
+                });
+
+                // Update username field based on selected service
+                service.each(function (i, obj) {
+                    if (obj.click_added !== true) {
+                        $(obj).change(() => updateUsernameField(i));
+                        updateUsernameField(i);
+                        obj.click_added = true;
+                    }
+                });
+            }
+
+            init();
+
+            add.click(() => init());
+
+        });
+    })(django.jQuery);
+</script>
