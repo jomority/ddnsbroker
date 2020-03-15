@@ -4,8 +4,6 @@ Django settings for ddnsbroker project.
 
 import os
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 SECRET_KEY = '!%3a@3lh!0y48x$=-^dkuj6z&__t=hloh7*pkqe=76#^q+4%tr'
 
 DEBUG = True
@@ -84,3 +82,44 @@ USE_L10N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'stderr': {
+            'format': '[{asctime}] {message}',
+            'style': '{',
+        },
+        'stderr_level': {
+            'format': '[{asctime}] {levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'stderr': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'stderr',
+        },
+        'stderr_level': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'stderr_level',
+        },
+    },
+    'loggers': {
+        'ddnsbroker': {
+            'handlers': ['stderr_level'],
+            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+        },
+        'django': {
+            'handlers': ['stderr'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+        'django.request': {
+            'handlers': ['stderr'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}
