@@ -1,10 +1,16 @@
+import logging
+import threading
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, AddressValueError
 
+import requests
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password, check_password
 from django.core.validators import RegexValidator, MaxValueValidator, URLValidator
 from django.db import models
 from django.utils import timezone
+from requests import ConnectionError
+
+logger = logging.getLogger(__name__)
 
 
 class Host(models.Model):
@@ -62,10 +68,10 @@ class Host(models.Model):
             self.generate_secret(secret=self.secret, save=False)
 
         ip_changed = False
-        if self.ipv4 != "" and IPv4Address(self.ipv4) != self.__original_ipv4:
+        if self.ipv4 != "" and self.ipv4 is not None and IPv4Address(self.ipv4) != self.__original_ipv4:
             self.last_ipv4_change = now
             ip_changed = True
-        if self.ipv6 != "" and IPv6Address(self.ipv6) != self.__original_ipv6:
+        if self.ipv6 != "" and self.ipv6 is not None and IPv6Address(self.ipv6) != self.__original_ipv6:
             self.last_ipv6_change = now
             ip_changed = True
 
@@ -81,11 +87,13 @@ class Host(models.Model):
         except AddressValueError:
             self.__original_ipv6 = None
 
-        if ip_changed:
-            for record in Record.objects.filter(host=self):
-                record.save(now=now)
+        threading.Thread(target=self.__update_clients, args=(now,)).start()
 
         return ip_changed
+
+    def __update_clients(self, now):
+        for record in Record.objects.filter(host=self):
+            record.save(now=now)
 
     def generate_secret(self, secret=None, save=True):
         if secret is None:
@@ -205,10 +213,13 @@ class Record(models.Model):
 
         if self.effective_ipv4 != self.__original_effective_ipv4:
             self.last_ipv4_change = now
-            # TODO: send update, if successful update last_ipv4_update
         if self.effective_ipv6 != self.__original_effective_ipv6:
             self.last_ipv6_change = now
-            # TODO: send update, if successful update last_ipv6_update
+
+        if self.ipv4_enabled and (self.last_ipv4_update is None or self.last_ipv4_change > self.last_ipv4_update):
+            self.dyndns2_update_ipv4(now=now)
+        if self.ipv6_enabled and (self.last_ipv6_update is None or self.last_ipv6_change > self.last_ipv6_update):
+            self.dyndns2_update_ipv6(now=now)
 
         super(Record, self).save(*args, **kwargs)
 
@@ -216,7 +227,7 @@ class Record(models.Model):
         self.__original_effective_ipv6 = self.effective_ipv6
 
     def __update_effective_ipv4(self) -> None:
-        if self.host.ipv4 is None or self.host.ipv4 is "":
+        if self.host.ipv4 is None or self.host.ipv4 == "":
             self.effective_ipv4 = None
             return
 
@@ -229,7 +240,7 @@ class Record(models.Model):
         self.effective_ipv4 = str(network_address + host_id_short)
 
     def __update_effective_ipv6(self) -> None:
-        if self.host.ipv6 is None or self.host.ipv6 is "":
+        if self.host.ipv6 is None or self.host.ipv6 == "":
             self.effective_ipv6 = None
             return
 
@@ -240,3 +251,42 @@ class Record(models.Model):
         network_address: IPv6Address = IPv6Network(network, strict=False).network_address
 
         self.effective_ipv6 = str(network_address + host_id_short)
+
+    def __dyndns2_update(self, ip: str) -> bool:
+        params = {
+            'hostname': self.fqdn,
+            'myip': ip
+        }
+        auth = (self.username, self.password)
+
+        logger.debug("update request: {} {}".format(self.service.url, params))
+
+        try:
+            r = requests.get(self.service.url, params=params, auth=auth, timeout=30)
+            r.close()
+
+            logger.debug("update response: {} {}".format(r.status_code, r.text))
+
+            if r.status_code == 200:
+                text = r.text.strip()
+                if text.startswith("good") or text.startswith("nochg"):
+                    return True
+                else:
+                    logger.error("update response error: {} {} -> {}".format(self.service.url, params, text))
+        except ConnectionError as e:
+            logger.error("update connection error: {} {}".format(self.service.url, params))
+            pass
+
+        return False
+
+    def dyndns2_update_ipv4(self, now=timezone.now()) -> bool:
+        success = self.__dyndns2_update(self.effective_ipv4)
+        if success:
+            self.last_ipv4_update = now
+        return success
+
+    def dyndns2_update_ipv6(self, now=timezone.now()) -> bool:
+        success = self.__dyndns2_update(self.effective_ipv6)
+        if success:
+            self.last_ipv6_update = now
+        return success
