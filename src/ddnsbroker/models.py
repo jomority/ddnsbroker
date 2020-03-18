@@ -1,5 +1,4 @@
 import logging
-import threading
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, AddressValueError
 
 import requests
@@ -87,13 +86,10 @@ class Host(models.Model):
         except AddressValueError:
             self.__original_ipv6 = None
 
-        threading.Thread(target=self.__update_clients, args=(now,)).start()
-
-        return ip_changed
-
-    def __update_clients(self, now):
         for record in Record.objects.filter(host=self):
             record.save(now=now)
+
+        return ip_changed
 
     def generate_secret(self, secret=None, save=True):
         if secret is None:
