@@ -216,9 +216,11 @@ class Record(models.Model):
         if self.effective_ipv6 != self.__original_effective_ipv6:
             self.last_ipv6_change = now
 
-        if self.ipv4_enabled and (self.last_ipv4_update is None or self.last_ipv4_change > self.last_ipv4_update):
+        if self.ipv4_enabled and self.effective_ipv4 is not None and \
+                (self.last_ipv4_update is None or self.last_ipv4_change > self.last_ipv4_update):
             self.dyndns2_update_ipv4(now=now)
-        if self.ipv6_enabled and (self.last_ipv6_update is None or self.last_ipv6_change > self.last_ipv6_update):
+        if self.ipv6_enabled and self.effective_ipv6 is not None and \
+                (self.last_ipv6_update is None or self.last_ipv6_change > self.last_ipv6_update):
             self.dyndns2_update_ipv6(now=now)
 
         super(Record, self).save(*args, **kwargs)
@@ -273,7 +275,7 @@ class Record(models.Model):
                     return True
                 else:
                     logger.error("update response error: {} {} -> {}".format(self.service.url, params, text))
-        except ConnectionError as e:
+        except ConnectionError:
             logger.error("update connection error: {} {}".format(self.service.url, params))
             pass
 
