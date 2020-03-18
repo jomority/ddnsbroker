@@ -263,14 +263,14 @@ class Record(models.Model):
             r = requests.get(self.service.url, params=params, auth=auth, timeout=30)
             r.close()
 
-            logger.debug("update response: {} {}".format(r.status_code, r.text))
+            text = r.text.strip()
+            code = r.status_code
 
-            if r.status_code == 200:
-                text = r.text.strip()
-                if text.startswith("good") or text.startswith("nochg"):
-                    return True
-                else:
-                    logger.error("update response error: {} {} -> {}".format(self.service.url, params, text))
+            if code == 200 and (text.startswith("good") or text.startswith("nochg")):
+                logger.info("update response success: {} {} -> {}".format(self.service.url, params, text))
+                return True
+            else:
+                logger.error("update response error: {} {} -> {} {}".format(self.service.url, params, code, text))
         except ConnectionError:
             logger.error("update connection error: {} {}".format(self.service.url, params))
             pass
