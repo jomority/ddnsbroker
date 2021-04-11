@@ -15,7 +15,24 @@ Please note: While this software is functional, it is in a very early stage and 
 These instructions will get you a copy of the project up and running on your local machine for development and testing purposes.
 See deployment for notes on how to deploy the project on a live system.
 
-### Prerequisites
+### Testing with container
+
+To quickly test this project locally, you can spin up a container with podman (or docker).
+
+```bash
+podman build -t ddnsbroker https://github.com/jomority/ddnsbroker.git
+podman run --rm -it -v ddnsbroker-var:/ddnsbroker/var ddnsbroker django-admin migrate
+podman run --rm -it -v ddnsbroker-var:/ddnsbroker/var ddnsbroker django-admin createsuperuser
+podman run --rm -it -v ddnsbroker-var:/ddnsbroker/var -p 8000:8000 -e DEBUG=True ddnsbroker
+```
+
+You can now configure DDnsBroker from the admin interface (<http://127.0.0.1:8000/admin>) and send dynamic updates to its dyndns2 interface, e.g., <http://127.0.0.1:8000/nic/update?hostname=loc01.example.com&myip=192.0.2.64&myip=2001:db8:1324:5678::>.
+
+### Developement with virtualenv
+
+A step by step series of examples that tells you how to get a development env running.
+
+#### Prerequisites
 
 You need ``python3``, ``pip`` and ``virtualenv`` are also recommended. You can install it as follows:
 
@@ -25,9 +42,7 @@ sudo dnf install python3 python3-virtualenv  # Fedora
 sudo pacman -S python python-virtualenv      # Arch
 ```
 
-### Installing
-
-A step by step series of examples that tell you how to get a development env running.
+#### Installing
 
 First clone the repo and enter the folder.
 
@@ -58,11 +73,11 @@ Run the development server locally.
 python3 manage.py runserver
 ```
 
-You can now configure DDnsBroker from the admin interface (<http://127.0.0.1:8000/admin>) and send dynamic updates to its dyndns2 interface, e.g., <http://127.0.0.1:8000/nic/update?hostname=loc01.example.com&myip=192.0.2.64&myip=2001:db8:1234:5678::>.
+You can now configure DDnsBroker from the admin interface (<http://127.0.0.1:8000/admin>) and send dynamic updates to its dyndns2 interface, e.g., <http://127.0.0.1:8000/nic/update?hostname=loc01.example.com&myip=192.0.2.64&myip=2001:db8:1324:5678::>.
 
-### Configuration
+## Configuration
 
-#### Host
+### Host
 
 Parameters, that a host uses to update its IP address(es) via the dyndns2 interface
 
@@ -73,9 +88,9 @@ Parameters, that a host uses to update its IP address(es) via the dyndns2 interf
 | IPv4 enabled  | Whether IPv4 updates are accepted                     | ` `                       |
 | IPv6 enabled  | Whether IPv6 updates are accepted                     | `✓`                       |
 | IPv4          | The current IPv4, can be changed manually             | `192.0.2.64`              |
-| IPv6          | The current IPv6, can be changed manually             | `2001:db8:1234:5678::`    |
+| IPv6          | The current IPv6, can be changed manually             | `2001:db8:1324:5678::`    |
 
-#### Record
+### Record
 
 A record, that will be updated at an external DNS service
 
@@ -93,7 +108,7 @@ A record, that will be updated at an external DNS service
 | Username              | The username used for the update                                      | `srv01.loc01.example.com` |
 | Password              | The password used for the update                                      | `53CR3TUPD4T3P455`        |
 
-#### Update service
+### Update service
 
 A real DNS service, that accepts updates via dyndns
 
@@ -107,7 +122,110 @@ A real DNS service, that accepts updates via dyndns
 
 For deployments, also read up on the [Django documentation](https://docs.djangoproject.com/en/3.0/howto/deployment/).
 
-In the following paragraph an example will be given using nginx, uWSGI, systemd and a service user named ddnsbroker.
+### Container deployment
+
+In this paragraph an example will be given using docker-compose, postgresql and caddy.
+
+Create the `docker-compose.yml` file:
+
+```yaml
+version: '3'
+services:
+  ddnsbroker:
+    build: https://github.com/jomority/ddnsbroker.git
+    image: ddnsbroker
+    depends_on:
+      - db
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      - static:/ddnsbroker/static
+      - ./settings.py:/ddnsbroker/settings.py:Z,ro
+    secrets:
+      - ddnsbroker_secret_key
+  db:
+    image: docker.io/library/postgres:alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ddnsbroker
+      POSTGRES_PASSWORD: SOME_RANDOM_PASSWORD
+    expose:
+      - "5432"
+    volumes:
+      - db:/var/lib/postgresql/data
+  caddy:
+    image: docker.io/library/caddy
+    restart: unless-stopped
+    ports:
+      - 80:80/tcp
+      - 443:443/tcp
+    volumes:
+      - caddy-data:/data
+      - ./Caddyfile:/etc/caddy/Caddyfile:Z,ro
+      - static:/srv/ddnsbroker-static:ro
+volumes:
+  static:
+  db:
+  caddy-data
+secrets:
+  ddnsbroker_secret_key:
+    external: true
+```
+
+Create the `settings.py` file:
+
+```python
+from ddnsbroker.settings import *
+import os
+
+with open('/run/secrets/ddnsbroker_secret_key') as f:
+    SECRET_KEY = f.read()
+
+DEBUG = os.environ.setdefault('DEBUG', 'False') == 'True'
+
+ALLOWED_HOSTS = ['*']
+
+STATIC_ROOT = 'static'
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'ddnsbroker',
+        'USER': 'ddnsbroker',
+        'PASSWORD': 'SOME_RANDOM_PASSWORD',
+        'HOST': 'db',
+        'PORT': '5432',
+    }
+}
+
+TIME_ZONE = 'Europe/Berlin'
+```
+
+Create the `Caddyfile` file:
+
+```caddyfile
+ddns.example.com ipv6.ddns.example.com ipv4.ddns.example.com {
+	encode zstd gzip
+	reverse_proxy ddnsbroker:8000
+	handle_path /static/* {
+		root * /srv/ddnsbroker-static/
+		file_server
+	}
+}
+```
+
+Create secret key, run the stack and create a superuser:
+
+```bash
+printf TOTALLY_SECRET_KEY | sudo docker secret create ddnsbroker_secret_key -
+docker-compose up -d
+docker exec -it ddnsbroker_ddnsbroker_1 django-admin createsuperuser
+```
+
+### Classic deployment
+
+In this paragraph an example will be given using nginx, uWSGI, systemd and a service user named ddnsbroker.
 Of course, in the real world you should use HTTPS and maybe a real database.
 
 Prepare the environment.
